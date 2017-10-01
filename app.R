@@ -1,6 +1,7 @@
 #!/usr/bin/Rscript
 
-# Sets deploy flag if on the server node, small hack to have same repo
+# Sets deploy flag if on the server node, small hack to have same repo for
+# local testing and deployment
 if(Sys.info()[["nodename"]]=='eserver'){ 
   deploy <- T
 }else{
@@ -9,7 +10,6 @@ if(Sys.info()[["nodename"]]=='eserver'){
 
 #### ----- everything here is run only once ----- ####
 
-# init
 library(shiny)
 library(dplyr)
 library(ggplot2)
@@ -19,7 +19,7 @@ library(readxl)
 library(httr)
 library(jsonlite)
 library(xml2)
-#library(Cairo)
+#library(Cairo) # Cairo graphics improves rendering on some Linux systems
 options(stringsAsFactors=FALSE) #, shiny.usecairo=TRUE)
 
 # file with gene ids and RefSeq positions:
@@ -30,7 +30,6 @@ allGenes$Chr = as.numeric(allGenes$Chr)
 allGenes$ypos = rep(1:5, length.out=nrow(allGenes))
 
 # file with full SNP positions
-# ? creates a file specifying the range where there are SNPs
 if(!file.exists("chrTable")){
 	d = read.table("bmi3full_snptest", h=T)
 	d <- d[,c('chromosome','position','all_maf','frequentist_add_pvalue')]
@@ -65,7 +64,7 @@ transt2d <- subset(b37pos, alternate_ids %in% transt2d.hits$SNP_PROXY) %>% selec
 ### if there's a lot of files and need to save RAM, can move this to 
 ### server.ui so that the user would wait for each file to load
 
-# files must be named geno_model_small.txt
+# files must be named <geno>_<model> and be present in the ./data subfolder
 # must have the following columns, with any names in the header:
 # "chromosome position all_maf frequentist_add_pvalue"
 if(deploy){
