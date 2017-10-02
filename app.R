@@ -22,6 +22,7 @@ library(xml2)
 #library(Cairo)
 options(stringsAsFactors=FALSE) #, shiny.usecairo=TRUE)
 
+setwd('/home/oyvind/gitprojects/erc-viewer/')
 # file with gene ids and RefSeq positions:
 allGenes = read.table("./resources/genelist.txt", h=F)
 colnames(allGenes) = c("Gene", "Chr", "Start", "Stop")
@@ -45,6 +46,10 @@ if(!file.exists("chrTable")){
 }
 allGenes = inner_join(allGenes, chrTable, by="Chr") %>%
 	mutate(FullStart = Start + ChrStart, FullStop = Stop + ChrStart)
+
+allRecomb = read.table(gzfile('./resources/recombination_rates.txt.gz'), header = T)
+allRecomb.tmp = inner_join(allRecomb, chrTable, by="Chr") %>%
+  mutate(AbsPos = Position.bp. + ChrStart)
 
 # Load previous hits
 b37pos <- fread('rsid_chr_pos_b37', h=T, data.table = F)
@@ -198,7 +203,10 @@ ui <- fluidPage(
 	
 	# additional plots/tables
 	tabsetPanel(
-	    tabPanel("Locus Zoom", plotOutput("locuszoom", click = "lz_single_click"), plotOutput("geneplot2")),
+	    tabPanel("Locus Zoom", 
+	             plotOutput("locuszoom", click = "lz_single_click"), 
+	             plotOutput("recombplot",height = 200),
+	             plotOutput("geneplot2")),
 	    tabPanel("Gene Context", plotOutput("geneplot")),
 	    tabPanel("Snapshot", plotOutput("snapshot")),
 	    tabPanel("Table", tableOutput("rawtable"))
@@ -347,7 +355,7 @@ server <- function(input, output) {
           lz
         })
         
-	# make the gene-context plot
+	      # make the gene-context plot
         output$geneplot = renderPlot({
             ggplot(allGenes) +
                 geom_segment(aes(x=FullStart, xend=FullStop, y=ypos, yend=ypos), lwd=3, col="darkblue") +
@@ -357,17 +365,28 @@ server <- function(input, output) {
                 theme_bw()
         })
         
+        # Makge gene-context plot a second time due to it be using two different places and need unique ID
         output$geneplot2 = renderPlot({
           ggplot(allGenes) +
             geom_segment(aes(x=FullStart, xend=FullStop, y=ypos, yend=ypos), lwd=3, col="darkblue") +
             geom_text(aes(label=Gene, x=(FullStart+FullStop)/2, y=ypos+0.2), size=4, fontface="italic") +
             coord_cartesian(xlim = ranges$x) +
             scale_x_continuous(breaks=breakmaker, labels=labelmaker) +
-            theme_bw()
+            theme_bw()  
         })
-        
-        output$testplot = renderPlot({
-          ggplot() + geom_point(aes(1,1))  
+        # 
+        output$recombplot = renderPlot({
+          if(!is.null(ranges$x)){
+            data$recomb = filter(allRecomb.tmp, AbsPos>ranges$x[1], AbsPos<ranges$x[2])
+            ggplot(data$recomb) +
+              geom_line(aes(x=AbsPos, y=Rate.cM.Mb.)) +
+              coord_cartesian(xlim = ranges$x) +
+              theme_bw()
+          } else {
+            ggplot() + 
+              annotate("text", x = 1, y = 1, label = "Recombination rates will be available on zoom") + 
+              theme_bw()
+          }
         })
         
 
