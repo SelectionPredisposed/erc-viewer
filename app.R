@@ -32,7 +32,7 @@ allGenes$ypos = rep(1:5, length.out=nrow(allGenes))
 
 # file with full SNP positions
 if(!file.exists("chrTable")){
-	d = read.table("bmi3full_snptest", h=T)
+	d = fread("bmi3_additive", h=T, stringsAsFactors = F, data.table = F)
 	d <- d[,c('chromosome','position','all_maf','frequentist_add_pvalue')]
 	colnames(d) = c("Chr", "Pos", "MAF", "P")
 	chrTable = group_by(d, Chr) %>%
@@ -51,19 +51,20 @@ allRecomb.tmp = inner_join(allRecomb, chrTable, by="Chr") %>%
   mutate(AbsPos = Position.bp. + ChrStart)
 
 # Load previous hits
-b37pos <- fread('rsid_chr_pos_b37', h=T, data.table = F)
+# load markers extracted from zbmi3 rot1
+b37pos <- fread('zcat rsid_chr_pos_b37.gz', h=T, data.table = F)
 
 felix.hits = read.table("resources/felix_bmi43_snps_full_proxy_table.csv", h=T, sep='\t') %>% subset(USE==1)
-felix <- subset(b37pos, alternate_ids %in% felix.hits$SNP_PROXY) %>% select(chromosome, position) %>% rename(Chr=chromosome, Pos=position)
-
+felix <- subset(b37pos, rsid %in% felix.hits$SNP_PROXY) %>% select(chromosome, position) %>% rename(Chr=chromosome, Pos=position)
+ 
 locke.hits = read.table("resources/locke_bmi97_snps_full_proxy_table.csv", h=T, sep='\t') %>% subset(USE==1)
-locke <- subset(b37pos, alternate_ids %in% locke.hits$SNP_PROXY) %>% select(chromosome, position) %>% rename(Chr=chromosome, Pos=position)
-
+locke <- subset(b37pos, rsid %in% locke.hits$SNP_PROXY) %>% select(chromosome, position) %>% rename(Chr=chromosome, Pos=position)
+ 
 horikoshi.hits = read.table("resources/horikoshi_bw58_snps_full_proxy_table.csv", h=T, sep='\t') %>% subset(USE==1)
-horikoshi <- subset(b37pos, alternate_ids %in% horikoshi.hits$SNP_PROXY) %>% select(chromosome, position) %>% rename(Chr=chromosome, Pos=position)
-
+horikoshi <- subset(b37pos, rsid %in% horikoshi.hits$SNP_PROXY) %>% select(chromosome, position) %>% rename(Chr=chromosome, Pos=position)
+ 
 transt2d.hits = read.table("resources/t2d-transethnic-diagram-scott2017-t2d76_snps_full_proxy_table.csv", h=T, sep='\t') %>% subset(USE==1)
-transt2d <- subset(b37pos, alternate_ids %in% transt2d.hits$SNP_PROXY) %>% select(chromosome, position) %>% rename(Chr=chromosome, Pos=position)
+transt2d <- subset(b37pos, rsid %in% transt2d.hits$SNP_PROXY) %>% select(chromosome, position) %>% rename(Chr=chromosome, Pos=position)
 
 ### -- input data files are loaded here -- ###
 ### if there's a lot of files and need to save RAM, can move this to 
@@ -73,6 +74,7 @@ transt2d <- subset(b37pos, alternate_ids %in% transt2d.hits$SNP_PROXY) %>% selec
 # must have the following columns, with any names in the header:
 # "chromosome position all_maf frequentist_add_pvalue"
 if(deploy){
+  batch = c('HARVEST', 'ROTTERDAM1')
   genos = c("bmi0"="bmi0",
             "bmi1"="bmi1",
             "bmi2"="bmi2",
@@ -87,26 +89,27 @@ if(deploy){
             "bmi12"="bmi12")
   models = c("additive"="additive")
 } else {
-  genos = c("bmi3"="bmi3")
+  genos = c("bmi2"="bmi2", "bmi3"="bmi3")
   models = c("additive"="additive")
+  batch = c('HARVEST', 'ROTTERDAM1')
 }
 
-alldata = list()
-for(g in genos){
-	for(m in models){
-		model = paste(g, m, sep="_")
-		infile = file.path("data", model)
-		print(sprintf("looking for file %s", infile))
-		if(file.exists(infile)) {
-			f = fread(infile, h=T, data.table=F)
-			      f <- f %>% select(chromosome,position,all_maf,frequentist_add_pvalue,rsid)
-        		colnames(f) = c("Chr", "Pos", "MAF", "P", "rsid")
-			f$Chr = as.integer(f$Chr)
-			alldata[[model]] = f
-			print(sprintf("file %s is read", infile))
-		}
-	}
-}
+#alldata = list()
+# for(g in genos){
+# 	for(m in models){
+# 		model = paste(g, m, sep="_")
+# 		infile = file.path("data", model)
+# 		print(sprintf("looking for file %s", infile))
+# 		if(file.exists(infile)) {
+# 			f = fread(infile, h=T, data.table=F)
+# 			      f <- f %>% select(chromosome,position,all_maf,frequentist_add_pvalue,rsid)
+#         		colnames(f) = c("Chr", "Pos", "MAF", "P", "rsid")
+# 			f$Chr = as.integer(f$Chr)
+# 			alldata[[model]] = f
+# 			print(sprintf("file %s is read", infile))
+# 		}
+# 	}
+# }
 gc()
 ### -- end data read -- ##
 
@@ -156,6 +159,9 @@ ui <- fluidPage(
     # settings panel for the left side
     sidebarLayout(
       sidebarPanel(
+          selectInput("select_batch",
+                    label="Select analysis batch:",
+                    choices=batch),
           selectInput("select_genomes",
                       label="Select the source of genomes to analyze:",
                       choices=genos),
@@ -163,16 +169,16 @@ ui <- fluidPage(
                       label="Select the type of model to analyze:",
                       choices=models),
           sliderInput("maf_cutoff",
-                      "Select the minimum MAF cutoff to include SNPs in the genome viewer:",
-                      min = -5.7, max = -1.4307, value=-2.86, step=0.05, width="100%"),
+                      "Select lower MAF cutoff:",
+                      min = 0, max = 0.1, value=0.01, step=0.005, width="100%"),
           sliderInput("p_cutoff",
-                      "Select the maximum P-value cutoff to include SNPs in the genome viewer:",
-                      min = -5, max = 0, value=-2.5, step=0.1, width="100%"),
+                      "Select the maximum -log10(P) cutoff to include SNPs in the genome viewer:",
+                      min = 0, max = 8, value=4, step=1, width="100%"),
           sliderInput("ld_window",
                       "Select the distance (in Kb) around selected marker to retrieve LD for:",
                       min=100, max=500, value=500, step=10, width="100%"),
           actionButton("load_file", "Load data"),
-          checkboxInput("add_labels", "Add SNP IDs to the plot (when SNPs<50)"),
+          checkboxInput("add_labels", "Add SNP IDs to the plot (when SNPs<50)",value = TRUE),
           checkboxInput("mark_locke", "Highlight SNPs from Locke (adult BMI) - orange"),
           checkboxInput("mark_felix", "Highlight SNPs from Felix (childhood BMI ~8-10y) - red"),
           checkboxInput("mark_horikoshi", "Highlight SNPs from Horikoshi (birth weight) - brown"),
@@ -227,10 +233,10 @@ server <- function(input, output) {
     
 
     output$readout_maf <- reactive({
-        sprintf("Showing only SNPs with MAF above %5.4f", 5^input$maf_cutoff)
+        sprintf("Showing only SNPs with MAF above %5.4f", input$maf_cutoff)
     })
     output$readout_p <- reactive({
-        sprintf("Showing only SNPs with P below %.3e", 10^input$p_cutoff)
+        sprintf("Showing only SNPs with P below %.3e", 10^-input$p_cutoff)
     })
     
     # reactive check to see if any of the settings were changed since last plotting
@@ -244,16 +250,33 @@ server <- function(input, output) {
 	  # (should make reactives instead of globals here)
       plot_maf <<- input$maf_cutoff
       plot_p <<- input$p_cutoff
+      plot_batch <<- input$select_batch
       plot_geno <<- input$select_genomes
       plot_model <<- input$select_model
-      maf_cut = 5^input$maf_cutoff
-      p_cut = 10^input$p_cutoff
+      maf_cut = input$maf_cutoff
+      p_cut = 10^-input$p_cutoff
 
     	# select the data source, filter MAF and P.
     	# could be moved out from observeEvent,
     	# so that the plot would update immediately
     	withProgress({
+    	       
+    	        # data loading happens on demand instead of loading all files upfront
+    	        alldata = list()
+              model = paste(plot_geno, plot_model, sep="_")
+          	  infile = file.path("data",plot_batch, model)
+          	  print(sprintf("looking for file %s", infile))
+      	      if(file.exists(infile)) {
+      	        f = fread(infile, h=T, data.table=F)
+      	        f <- f %>% select(chromosome,position,all_maf,frequentist_add_pvalue,rsid)
+      	        colnames(f) = c("Chr", "Pos", "MAF", "P", "rsid")
+      	        f$Chr = as.integer(f$Chr)
+      	        alldata[[model]] = f
+      	        print(sprintf("file %s is read", infile))
+      	      }
+    	  
            		data$d = alldata[[paste(plot_geno, plot_model, sep="_")]] 
+           		print(data)
             	data$d = inner_join(data$d, chrTable, by="Chr") %>%
             	    mutate(FullPos = Pos + ChrStart, logP=-log(P,10))
     		data$d = filter(data$d, MAF>maf_cut, P<p_cut)
@@ -283,7 +306,8 @@ server <- function(input, output) {
       		# change color scale to show MAF
       		if(input$color_maf){
       			manh <<- manh + aes(color = MAF) +
-      				scale_color_continuous(trans="log10", low="lightyellow2", high="blue4", breaks=c(0.001, 0.003, 0.005, 0.01, 0.03, 0.05, 0.1, 0.3, 0.5))
+      				scale_color_continuous(trans="log10", low="lightyellow2", high="blue4", breaks=c(0.001, 0.005, 0.01, 0.02, 0.05, 0.1, 0.5), limits=c(0.001,0.5))
+      			  #scale_color_gradientn(trans="log10", colours = rainbow(4), breaks=c(0.001, 0.005, 0.01, 0.02, 0.05, 0.1, 0.5), limits=c(0.001,0.5))
       		} else {
       			manh <<- manh + aes(color = Chr%%2==0) +
       				scale_color_manual(values=c("skyblue3", "lightgreen", "red"), guide=FALSE)
@@ -323,7 +347,7 @@ server <- function(input, output) {
         		manh <<- manh + scale_x_continuous(breaks = breakmaker,
         						   labels = labelmaker)
         		if(input$add_labels & nrow(data$d)<50){
-        			manh <<- manh + geom_text_repel(aes(label=paste(rsid, Chr, Pos, sep="_")))
+        			manh <<- manh + geom_text_repel(aes(label=rsid))
         		}
         	}
         	manh
@@ -349,7 +373,7 @@ server <- function(input, output) {
           }
         
           if(input$add_labels & nrow(data$d)<50){
-            lz <<- lz + geom_text_repel(aes(label=paste(rsid, Chr, Pos, sep="_")))
+            lz <<- lz + geom_text_repel(aes(label=rsid))
           }
           lz
         })
@@ -421,7 +445,7 @@ server <- function(input, output) {
 		out$Pos = as.character(out$Pos)
 		out
 	}
-	else { data.frame(warning="Do not use this function when >100 SNPs are seen in the plot.") }
+	else { data.frame(warning="Table will appear when <100 SNPs are seen in the plot") }
     }, digits = -3)
     
   observeEvent(input$lz_single_click, {
