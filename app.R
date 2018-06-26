@@ -22,7 +22,7 @@ library(xml2)
 #library(Cairo) # Cairo graphics improves rendering on some Linux systems
 options(stringsAsFactors=FALSE) #, shiny.usecairo=TRUE)
 
-setwd('/home/oyvind/gitprojects/erc-viewer/')
+setwd('/srv/shiny-server/ercviewer/')
 # file with gene ids and RefSeq positions:
 allGenes = read.table("./resources/genelist.txt", h=F)
 colnames(allGenes) = c("Gene", "Chr", "Start", "Stop")
@@ -168,12 +168,13 @@ ui <- fluidPage(
           selectInput("select_model",
                       label="Select the type of model to analyze:",
                       choices=models),
+	  # see scientific slider js for interpreation of values
           sliderInput("maf_cutoff",
                       "Select lower MAF cutoff:",
-                      min = 0, max = 0.1, value=0.01, step=0.005, width="100%"),
+                      min = -5.7, max = -1.4307, value=-2.86, step=0.05, width="100%"),
           sliderInput("p_cutoff",
                       "Select the maximum -log10(P) cutoff to include SNPs in the genome viewer:",
-                      min = 0, max = 8, value=4, step=1, width="100%"),
+                      min = -5, max = 0, value=-2.5, step=0.1, width="100%"),
           sliderInput("ld_window",
                       "Select the distance (in Kb) around selected marker to retrieve LD for:",
                       min=100, max=500, value=500, step=10, width="100%"),
@@ -233,10 +234,10 @@ server <- function(input, output) {
     
 
     output$readout_maf <- reactive({
-        sprintf("Showing only SNPs with MAF above %5.4f", input$maf_cutoff)
+        sprintf("Showing only SNPs with MAF above %5.4f", 5^input$maf_cutoff)
     })
     output$readout_p <- reactive({
-        sprintf("Showing only SNPs with P below %.3e", 10^-input$p_cutoff)
+        sprintf("Showing only SNPs with P below %.3e", 10^input$p_cutoff)
     })
     
     # reactive check to see if any of the settings were changed since last plotting
@@ -253,8 +254,8 @@ server <- function(input, output) {
       plot_batch <<- input$select_batch
       plot_geno <<- input$select_genomes
       plot_model <<- input$select_model
-      maf_cut = input$maf_cutoff
-      p_cut = 10^-input$p_cutoff
+      maf_cut = 5^input$maf_cutoff
+      p_cut = 10^input$p_cutoff
 
     	# select the data source, filter MAF and P.
     	# could be moved out from observeEvent,
