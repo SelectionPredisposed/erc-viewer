@@ -4,8 +4,10 @@
 # local testing and deployment
 if(Sys.info()[["nodename"]]=='eserver'){ 
   deploy <- T
+  setwd('/srv/shiny-server/ercviewer/')
 }else{
   deploy <- F
+  setwd('.')
 }
 
 #### ----- everything here is run only once ----- ####
@@ -19,10 +21,11 @@ library(readxl)
 library(httr)
 library(jsonlite)
 library(xml2)
+library(biomaRt)
 #library(Cairo) # Cairo graphics improves rendering on some Linux systems
 options(stringsAsFactors=FALSE) #, shiny.usecairo=TRUE)
 
-setwd('/srv/shiny-server/ercviewer/')
+
 # file with gene ids and RefSeq positions:
 allGenes = read.table("./resources/genelist.txt", h=F)
 colnames(allGenes) = c("Gene", "Chr", "Start", "Stop")
@@ -55,16 +58,16 @@ allRecomb.tmp = inner_join(allRecomb, chrTable, by="Chr") %>%
 b37pos <- fread('zcat rsid_chr_pos_b37.gz', h=T, data.table = F)
 
 felix.hits = read.table("resources/felix_bmi43_snps_full_proxy_table.csv", h=T, sep='\t') %>% subset(USE==1)
-felix <- subset(b37pos, rsid %in% felix.hits$SNP_PROXY) %>% select(chromosome, position) %>% rename(Chr=chromosome, Pos=position)
+felix <- subset(b37pos, rsid %in% felix.hits$SNP_PROXY) %>% dplyr::select(chromosome, position) %>% rename(Chr=chromosome, Pos=position)
  
 locke.hits = read.table("resources/locke_bmi97_snps_full_proxy_table.csv", h=T, sep='\t') %>% subset(USE==1)
-locke <- subset(b37pos, rsid %in% locke.hits$SNP_PROXY) %>% select(chromosome, position) %>% rename(Chr=chromosome, Pos=position)
+locke <- subset(b37pos, rsid %in% locke.hits$SNP_PROXY) %>% dplyr::select(chromosome, position) %>% rename(Chr=chromosome, Pos=position)
  
 horikoshi.hits = read.table("resources/horikoshi_bw58_snps_full_proxy_table.csv", h=T, sep='\t') %>% subset(USE==1)
-horikoshi <- subset(b37pos, rsid %in% horikoshi.hits$SNP_PROXY) %>% select(chromosome, position) %>% rename(Chr=chromosome, Pos=position)
+horikoshi <- subset(b37pos, rsid %in% horikoshi.hits$SNP_PROXY) %>% dplyr::select(chromosome, position) %>% rename(Chr=chromosome, Pos=position)
  
 transt2d.hits = read.table("resources/t2d-transethnic-diagram-scott2017-t2d76_snps_full_proxy_table.csv", h=T, sep='\t') %>% subset(USE==1)
-transt2d <- subset(b37pos, rsid %in% transt2d.hits$SNP_PROXY) %>% select(chromosome, position) %>% rename(Chr=chromosome, Pos=position)
+transt2d <- subset(b37pos, rsid %in% transt2d.hits$SNP_PROXY) %>% dplyr::select(chromosome, position) %>% rename(Chr=chromosome, Pos=position)
 
 ### -- input data files are loaded here -- ###
 ### if there's a lot of files and need to save RAM, can move this to 
@@ -74,7 +77,7 @@ transt2d <- subset(b37pos, rsid %in% transt2d.hits$SNP_PROXY) %>% select(chromos
 # must have the following columns, with any names in the header:
 # "chromosome position all_maf frequentist_add_pvalue"
 if(deploy){
-  batch = c('HARVEST', 'ROTTERDAM1')
+  batch = batch = c('HARVESTv9', 'ROTTERDAM1','META','HARVESTv10')
   genos = c("bmi0"="bmi0",
             "bmi1"="bmi1",
             "bmi2"="bmi2",
@@ -89,9 +92,9 @@ if(deploy){
             "bmi12"="bmi12")
   models = c("additive"="additive")
 } else {
-  genos = c("bmi2"="bmi2", "bmi3"="bmi3")
+  genos = c("bmi0"="bmi0", "bmi1"="bmi1")
   models = c("additive"="additive")
-  batch = c('HARVEST', 'ROTTERDAM1')
+  batch = c('META','HARVEST', 'ROTTERDAM1')
 }
 
 #alldata = list()
@@ -147,6 +150,11 @@ breakmaker = function(x){
 labelmaker = function(b){
        	breakchrs = findInterval(b, chrTable$ChrStart)
        	paste(chrTable$Chr[breakchrs], round(b - chrTable$ChrStart[breakchrs]), sep=":")
+}
+
+# function for creating link in biomart results
+createLink <- function(val) {
+  sprintf('<a href="https://www.ncbi.nlm.nih.gov/pubmed/%s" target="_blank" class="btn btn-primary">Article</a>',val)
 }
 
 #### ----- everything here is individually launched for each user ----- ####
@@ -215,7 +223,8 @@ ui <- fluidPage(
 	             plotOutput("geneplot2")),
 	    tabPanel("Gene Context", plotOutput("geneplot")),
 	    tabPanel("Snapshot", plotOutput("snapshot")),
-	    tabPanel("Table", tableOutput("rawtable"))
+	    tabPanel("Table", tableOutput("rawtable")),
+	    tabPanel("biomaRt", tableOutput("biomarttable"))
 	)
       )
    )
@@ -269,7 +278,7 @@ server <- function(input, output) {
           	  print(sprintf("looking for file %s", infile))
       	      if(file.exists(infile)) {
       	        f = fread(infile, h=T, data.table=F)
-      	        f <- f %>% select(chromosome,position,all_maf,frequentist_add_pvalue,rsid)
+      	        f <- f %>% dplyr::select(chromosome,position,all_maf,frequentist_add_pvalue,rsid)
       	        colnames(f) = c("Chr", "Pos", "MAF", "P", "rsid")
       	        f$Chr = as.integer(f$Chr)
       	        alldata[[model]] = f
@@ -432,6 +441,47 @@ server <- function(input, output) {
         }
     })
 
+    # on single click, find nearest point
+    observeEvent(input$manh_single_click, {
+      withProgress({
+        df <- nearPoints(data$d, input$manh_single_click, addDist = TRUE)
+        if(nrow(df) > 0){
+          selmarker <- df[1,]$rsid
+          
+          ensembl = useMart(biomart = 'ENSEMBL_MART_SNP',
+                            host="www.ensembl.org",
+                            dataset = 'hsapiens_snp',
+                            path="/biomart/martservice")
+          
+          res <- getBM(attributes = c('refsnp_id','associated_gene','allele','minor_allele_freq','phenotype_name','pmid','title','year'),
+                       filters = "snp_filter",
+                       values = list(selmarker),
+                       mart = ensembl)
+          output$biomarttable = renderTable({
+            # create link out of pmid
+            res$pmid <- createLink(res$pmid)
+            
+            # to avoid duplicates where associated genes differs
+            # the following adds all unique gene names to all entries
+            g <- c(unique(res$associated_gene))
+            g <- paste(g,collapse = ",") 
+            g <- strsplit(g,split = ',')             
+            g <- unlist(g)
+            g <- unique(g)
+            g <- paste(g, collapse = ',')
+            res$associated_gene <- g
+            
+            # remove duplicates
+            res <- res[!duplicated(res),]
+            
+            # order by year, newest first
+            res <- arrange(res,-year)
+            return(res)
+          }, sanitize.text.function = function(x) x)
+        }
+      }, message="fetching GWAS-catalog info...")
+    })
+    
     # save current view for comparison
     observeEvent(input$make_snap, {
     	snap = manh
@@ -468,7 +518,7 @@ server <- function(input, output) {
           ld$variation2 <- unlist(ld$variation2)
           
           lzval$selmarker <- selmarker
-          lzval$lduse <- ld %>% select(variation2, r2)
+          lzval$lduse <- ld %>% dplyr::select(variation2, r2)
         }
       }
     }, message="fetching LD-info...")
