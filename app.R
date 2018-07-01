@@ -341,7 +341,7 @@ server <- function(input, output) {
 
 		      # main plot call
         	manh <<- ggplot(data$d, aes(x=FullPos, y=logP)) +
-			      geom_point(aes(shape=factor(gwascat))) + scale_shape_manual(values=c(16, 3)) +
+			      geom_point(aes(shape=factor(gwascat)),size=2) + scale_shape_manual(values=c(16, 3)) +
         		geom_hline(yintercept=5, col="orange") + geom_hline(yintercept=7.3, col="darkred") +
         		coord_cartesian(xlim = ranges$x) +
         		scale_x_continuous(breaks = chrTable$ChrStart+chrTable$ChrL/2,
