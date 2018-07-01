@@ -25,6 +25,8 @@ library(biomaRt)
 #library(Cairo) # Cairo graphics improves rendering on some Linux systems
 options(stringsAsFactors=FALSE) #, shiny.usecairo=TRUE)
 
+# load gwas catalog
+gwascat <- data.frame(read_excel('./resources/gwas_catalog_v1.0.2-associations.xlsx'))
 
 # file with gene ids and RefSeq positions:
 allGenes = read.table("./resources/genelist.txt", h=F)
@@ -157,6 +159,36 @@ createLink <- function(val) {
   sprintf('<a href="https://www.ncbi.nlm.nih.gov/pubmed/%s" target="_blank" class="btn btn-primary">Article</a>',val)
 }
 
+# query biomart
+getmart <- function(selmarker){
+  ensembl = useMart(biomart = 'ENSEMBL_MART_SNP',
+                    host="www.ensembl.org",
+                    dataset = 'hsapiens_snp',
+                    path="/biomart/martservice")
+  
+  res <- getBM(attributes = c('refsnp_id','associated_gene','allele','minor_allele_freq','phenotype_name','pmid','title','year'),
+               filters = "snp_filter",
+               values = list(selmarker),
+               mart = ensembl)
+  
+  # to avoid duplicates where associated genes differs
+  # the following adds all unique gene names to all entries
+  g <- c(unique(res$associated_gene))
+  g <- paste(g,collapse = ",") 
+  g <- strsplit(g,split = ',')             
+  g <- unlist(g)
+  g <- unique(g)
+  g <- paste(g, collapse = ',')
+  res$associated_gene <- g
+  
+  # remove duplicates
+  res <- res[!duplicated(res),]
+  
+  # order by year, newest first
+  res <- arrange(res,-year)
+  return(res)
+}
+
 #### ----- everything here is individually launched for each user ----- ####
 ui <- fluidPage(
     tags$head(tags$script(HTML(JS.logify))),
@@ -192,7 +224,8 @@ ui <- fluidPage(
           checkboxInput("mark_felix", "Highlight SNPs from Felix (childhood BMI ~8-10y) - red"),
           checkboxInput("mark_horikoshi", "Highlight SNPs from Horikoshi (birth weight) - brown"),
           checkboxInput("mark_transt2d", "Highlight SNPs from Scott (transethnic T2D) - black"),
-          checkboxInput("color_maf", "Add MAF color scale (not compatible with the highlighting above)")
+          checkboxInput("color_maf", "Add MAF color scale (not compatible with the highlighting above)"),
+	        checkboxInput("query_biomart", "Query biomaRt on click")
     ),
 
     mainPanel(
@@ -224,7 +257,8 @@ ui <- fluidPage(
 	    tabPanel("Gene Context", plotOutput("geneplot")),
 	    tabPanel("Snapshot", plotOutput("snapshot")),
 	    tabPanel("Table", tableOutput("rawtable")),
-	    tabPanel("biomaRt", tableOutput("biomarttable"))
+	    tabPanel("biomaRt", tableOutput("biomarttable")),
+	    tabPanel("GWAS catalog", tableOutput("gctable"))
 	)
       )
    )
@@ -289,6 +323,7 @@ server <- function(input, output) {
            		print(data)
             	data$d = inner_join(data$d, chrTable, by="Chr") %>%
             	    mutate(FullPos = Pos + ChrStart, logP=-log(P,10))
+            	data$d$gwascat <- ifelse(data$d$rsid %in% gwascat$SNPS, 1,0)
     		data$d = filter(data$d, MAF>maf_cut, P<p_cut)
     	}, message="filtering data")
             dfull = data$d
@@ -306,12 +341,12 @@ server <- function(input, output) {
 
 		      # main plot call
         	manh <<- ggplot(data$d, aes(x=FullPos, y=logP)) +
-			      geom_point() +
+			      geom_point(aes(shape=factor(gwascat))) + scale_shape_manual(values=c(16, 3)) +
         		geom_hline(yintercept=5, col="orange") + geom_hline(yintercept=7.3, col="darkred") +
         		coord_cartesian(xlim = ranges$x) +
         		scale_x_continuous(breaks = chrTable$ChrStart+chrTable$ChrL/2,
         						   labels = chrTable$Chr) +
-        		theme_bw()
+        		theme_bw() + theme(legend.position="none")
         	
       		# change color scale to show MAF
       		if(input$color_maf){
@@ -448,38 +483,54 @@ server <- function(input, output) {
         if(nrow(df) > 0){
           selmarker <- df[1,]$rsid
           
-          ensembl = useMart(biomart = 'ENSEMBL_MART_SNP',
-                            host="www.ensembl.org",
-                            dataset = 'hsapiens_snp',
-                            path="/biomart/martservice")
+          output$gctable = renderTable({
+            gcres <- subset(gwascat , SNPS == selmarker)
+            return(gcres)
+          })
           
-          res <- getBM(attributes = c('refsnp_id','associated_gene','allele','minor_allele_freq','phenotype_name','pmid','title','year'),
-                       filters = "snp_filter",
-                       values = list(selmarker),
-                       mart = ensembl)
-          output$biomarttable = renderTable({
-            # create link out of pmid
-            res$pmid <- createLink(res$pmid)
+          if(input$query_biomart){
+            res <- getmart(selmarker)
+            output$biomarttable = renderTable({
+              # create link out of pmid
+              res$pmid <- createLink(res$pmid)
+              return(res)
+            }, sanitize.text.function = function(x) x)
             
-            # to avoid duplicates where associated genes differs
-            # the following adds all unique gene names to all entries
-            g <- c(unique(res$associated_gene))
-            g <- paste(g,collapse = ",") 
-            g <- strsplit(g,split = ',')             
-            g <- unlist(g)
-            g <- unique(g)
-            g <- paste(g, collapse = ',')
-            res$associated_gene <- g
+          }
+            # ensembl = useMart(biomart = 'ENSEMBL_MART_SNP',
+            #                   host="www.ensembl.org",
+            #                   dataset = 'hsapiens_snp',
+            #                   path="/biomart/martservice")
+            # 
+            # res <- getBM(attributes = c('refsnp_id','associated_gene','allele','minor_allele_freq','phenotype_name','pmid','title','year'),
+            #              filters = "snp_filter",
+            #              values = list(selmarker),
+            #              mart = ensembl)
             
-            # remove duplicates
-            res <- res[!duplicated(res),]
+            # output$biomarttable = renderTable({
+            #   # create link out of pmid
+            #   res$pmid <- createLink(res$pmid)
+            #   
+            #   # to avoid duplicates where associated genes differs
+            #   # the following adds all unique gene names to all entries
+            #   g <- c(unique(res$associated_gene))
+            #   g <- paste(g,collapse = ",") 
+            #   g <- strsplit(g,split = ',')             
+            #   g <- unlist(g)
+            #   g <- unique(g)
+            #   g <- paste(g, collapse = ',')
+            #   res$associated_gene <- g
+            #   
+            #   # remove duplicates
+            #   res <- res[!duplicated(res),]
+            #   
+            #   # order by year, newest first
+            #   res <- arrange(res,-year)
+            #   return(res)
             
-            # order by year, newest first
-            res <- arrange(res,-year)
-            return(res)
-          }, sanitize.text.function = function(x) x)
+          # }, sanitize.text.function = function(x) x)
         }
-      }, message="fetching GWAS-catalog info...")
+      }, message="fetching biomaRt info...")
     })
     
     # save current view for comparison
