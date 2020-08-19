@@ -2,13 +2,14 @@
 
 # Sets deploy flag if on the server node, small hack to have same repo for
 # local testing and deployment
-if(Sys.info()[["nodename"]]=='eserver'){ 
-  deploy <- T
-  setwd('/srv/shiny-server/ercviewer/')
-}else{
-  deploy <- F
-  setwd('.')
-}
+#if(Sys.info()[["nodename"]]=='eserver'){ 
+#  deploy <- T
+#  setwd('/srv/shiny-server/ercviewer/')
+#}else{
+#  deploy <- F
+#  setwd('.')
+#}
+deploy <- T
 
 #### ----- everything here is run only once ----- ####
 
@@ -37,7 +38,7 @@ allGenes$ypos = rep(1:5, length.out=nrow(allGenes))
 
 # file with full SNP positions
 if(!file.exists("chrTable")){
-	d = fread("bmi3_additive", h=T, stringsAsFactors = F, data.table = F)
+	d = fread("/data/META/bmi0_additive", h=T, stringsAsFactors = F, data.table = F)
 	d <- d[,c('chromosome','position','all_maf','frequentist_add_pvalue')]
 	colnames(d) = c("Chr", "Pos", "MAF", "P")
 	chrTable = group_by(d, Chr) %>%
@@ -79,7 +80,7 @@ transt2d <- subset(b37pos, rsid %in% transt2d.hits$SNP_PROXY) %>% dplyr::select(
 # must have the following columns, with any names in the header:
 # "chromosome position all_maf frequentist_add_pvalue"
 if(deploy){
-  batch = batch = c('HARVESTv9', 'ROTTERDAM1','META','HARVESTv10')
+  batch = batch = c('HARVESTv9', 'ROTTERDAM1','META','HARVESTv10','PAPER2')
   genos = c("bmi0"="bmi0",
             "bmi1"="bmi1",
             "bmi2"="bmi2",
@@ -87,6 +88,7 @@ if(deploy){
             "bmi4"="bmi4",
             "bmi5"="bmi5",
             "bmi6"="bmi6",
+            "bmi7"="bmi7",
             "bmi8"="bmi8",
             "bmi9"="bmi9",
             "bmi10"="bmi10",
@@ -308,7 +310,7 @@ server <- function(input, output) {
     	        # data loading happens on demand instead of loading all files upfront
     	        alldata = list()
               model = paste(plot_geno, plot_model, sep="_")
-          	  infile = file.path("data",plot_batch, model)
+          	  infile = file.path("/data",plot_batch, model)
           	  print(sprintf("looking for file %s", infile))
       	      if(file.exists(infile)) {
       	        f = fread(infile, h=T, data.table=F)
